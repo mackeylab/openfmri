@@ -155,9 +155,11 @@ def bandpass_filter(files, lowpass_freq, highpass_freq, fs):
         lowidx = int(timepoints / 2) + 1
         if lowpass_freq > 0:
             lowidx = np.round(float(lowpass_freq) / fs * timepoints)
+            lowidx = lowidx.astype(int)
         highidx = 0
         if highpass_freq > 0:
             highidx = np.round(float(highpass_freq) / fs * timepoints)
+            highidx = highidx.astype(int)
         F[highidx:lowidx] = 1
         F = ((F + F[::-1]) > 0).astype(int)
         data = img.get_data()
@@ -219,6 +221,7 @@ def build_filter1(motion_params, comp_norm, outliers, detrend_poly=None):
         out_params = np.hstack((params, norm_val[:, None]))
         try:
             outlier_val = np.genfromtxt(filename_to_list(outliers)[idx])
+            outlier_val= outlier_val.astype(int)
         except IOError:
             outlier_val = np.empty((0))
         for index in np.atleast_1d(outlier_val):

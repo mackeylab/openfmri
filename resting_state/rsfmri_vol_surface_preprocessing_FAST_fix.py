@@ -51,6 +51,7 @@ import os
 
 from nipype.interfaces.base import CommandLine
 CommandLine.set_default_terminal_output('allatonce')
+from nipype.interfaces.io import DataGrabber
 
 from dcmstack.extract import default_extractor
 from dicom import read_file
@@ -103,8 +104,8 @@ def get_info_topup(dicom_files):
     meta = default_extractor(read_file(filename_to_list(dicom_files)[0],
                                        stop_before_pixels=True,
                                        force=True))
-    return (meta['CsaImage.BandwidthPerPixelPhaseEncode'],
-            meta['AcquisitionMatrix'][0])
+    return (meta['CsaImage.BandwidthPerPixelPhaseEncode'],  
+            meta['AcquisitionMatrix'][0]) 
 
 
 def median(in_files):
@@ -358,8 +359,8 @@ def combine_hemi(left, right):
 def write_encoding_file(readout, fname, direction):
     import os
     filename = os.path.join(os.getcwd(), 'acq_param_%s.txt' % fname)
-    with open(filename, 'w') as f:
-        f.writelines(['0 %d 0 %s\n' % (direction, readout),
+    with open(filename, 'w') as f:  
+        f.writelines(['0 %d 0 %s\n' % (direction, readout),    
                       '0 %d 0 %s\n' % (direction * -1, readout)])
     return filename
 
@@ -404,8 +405,8 @@ def create_reg_workflow(name='registration'):
                                                           'segmentation_files',
                                                           'anat2target',
                                                           'aparc',
-                                                          'min_cost_file',
-                                                          'mean2anat_mask']),
+                                                          'min_cost_file'
+                                                          ]),
                       name='outputspec')
 
     # Get the subject's freesurfer source directory
@@ -426,7 +427,6 @@ def create_reg_workflow(name='registration'):
     bbregister.inputs.contrast_type = 't2'
     bbregister.inputs.out_fsl_file = True
     bbregister.inputs.epi_mask = True
-    bbregister.inputs.registered_file = True
     register.connect(inputnode, 'subject_id', bbregister, 'subject_id')
     register.connect(inputnode, 'mean_image', bbregister, 'source_file')
     register.connect(inputnode, 'subjects_dir', bbregister, 'subjects_dir')
@@ -434,31 +434,34 @@ def create_reg_workflow(name='registration'):
     """
     Estimate the tissue classes from the anatomical image. But use aparc+aseg's brain mask
     """
-
+    
     binarize = Node(fs.Binarize(min=0.5, out_type="nii.gz", dilate=1), name="binarize_aparc")
     register.connect(fssource, ("aparc_aseg", get_aparc_aseg), binarize, "in_file")
     stripper = Node(fsl.ApplyMask(), name='stripper')
     register.connect(binarize, "binary_file", stripper, "mask_file")
     register.connect(convert, 'out_file', stripper, 'in_file')
 
-    fast = Node(fsl.FAST(), name='fast')
-    register.connect(stripper, 'out_file', fast, 'in_files')
-
+#    fast = Node(fsl.FAST(), name='fast')
+#    register.connect(stripper, 'out_file', fast, 'in_files')
+    
     """
-    Create a mask of the median coregistered to the anatomical image
+    Get the estimated tissues classes custom masks that were masked and segmented separately
     """
-
-    mean2anat_mask = Node(fsl.BET(mask=True), name='mean2anat_mask')
-    register.connect(bbregister, 'registered_file', mean2anat_mask, 'in_file')
-
+    
+    dg = Node(DataGrabber(infields=['subject_id'], outfields=['custom_mask']),name='grabber')
+    dg.inputs.template = os.path.abspath('/data/picsl/mackey_group/Ursula/subjects/%s/resting/custom_mask_files/T1_masked_pve_%s_ornt_maths.nii.gz')
+    dg.inputs.template_args['custom_mask'] = [['subject_id',[0,1,2]]]
+    dg.inputs.sort_filelist = True
+    register.connect(inputnode, 'subject_id',dg,'subject_id')
+    
     """
     Binarize the segmentation
     """
 
-    binarize = MapNode(fsl.ImageMaths(op_string='-nan -thr 0.9 -ero -bin'),
-                       iterfield=['in_file'],
-                       name='binarize')
-    register.connect(fast, 'partial_volume_files', binarize, 'in_file')
+ #   binarize = MapNode(fsl.ImageMaths(op_string='-nan -thr 0.9 -ero -bin'),
+ #                      iterfield=['in_file'],
+ #                      name='binarize')
+ #   register.connect(fast, 'partial_volume_files', binarize, 'in_file')
 
     """
     Apply inverse transform to take segmentations to functional space
@@ -468,9 +471,10 @@ def create_reg_workflow(name='registration'):
                                                     interp='nearest'),
                        iterfield=['target_file'],
                        name='inverse_transform')
+    register.connect(dg, 'custom_mask', applyxfm, 'target_file')
     register.connect(inputnode, 'subjects_dir', applyxfm, 'subjects_dir')
     register.connect(bbregister, 'out_reg_file', applyxfm, 'reg_file')
-    register.connect(binarize, 'out_file', applyxfm, 'target_file')
+#   register.connect(binarize, 'out_file', applyxfm, 'target_file')
     register.connect(inputnode, 'mean_image', applyxfm, 'source_file')
 
     """
@@ -580,15 +584,13 @@ def create_reg_workflow(name='registration'):
     register.connect(merge, 'out', outputnode, 'transforms')
     register.connect(bbregister, 'min_cost_file',
                      outputnode, 'min_cost_file')
-    register.connect(mean2anat_mask, 'mask_file',
-                     outputnode, 'mean2anat_mask')
 
     return register
 
-
-def create_topup_workflow(num_slices, rest_pe_dir, readout,
+    
+def create_topup_workflow(num_slices, rest_pe_dir, readout, 
                           readout_topup, name='topup'):
-    """Create a geometric distortion correction workflow using TOPUP
+    """Create a geometric distortion correction workflow using TOPUP 
 
     Parameters
     ----------
@@ -607,9 +609,9 @@ def create_topup_workflow(num_slices, rest_pe_dir, readout,
         outputspec.topup_encoding_file : acquisition parameter text file for TOPUP files
         outputspec.rest_encoding_file : acquisition parameter text file for rest file
         outputspec.topup_fieldcoef : spline coefficients encoding the off-resonance field
-        outputspec.topup_movpar : TOPUP movement parameters output file
+        outputspec.topup_movpar : TOPUP movement parameters output file 
         outputspec.topup_corrected : corrected TOPUP file
-        outputspec.applytopup_corrected : corrected resting state time series
+        outputspec.applytopup_corrected : corrected resting state time series 
     """
 
     topup = Workflow(name=name)
@@ -634,22 +636,22 @@ def create_topup_workflow(num_slices, rest_pe_dir, readout,
 
     opp_pe_dir = [pe_dir for pe_dir in pe_dirs.keys() if pe_dir != rest_pe_dir][0]
 
-    topup2median = Node(fsl.FLIRT(out_file='%s2median.nii.gz' % rest_pe_dir,
-                                  output_type='NIFTI_GZ', interp='spline'),
+    topup2median = Node(fsl.FLIRT(out_file='%s2median.nii.gz' % rest_pe_dir, 
+                                  output_type='NIFTI_GZ', interp='spline'), 
                         name='%s2median' % rest_pe_dir)
     topup2median.inputs.dof = 6
     topup2median.inputs.out_matrix_file = '%s2median' % rest_pe_dir
 
-    applyxfm = Node(fsl.ApplyXfm(out_file='%s2median.nii.gz' % opp_pe_dir,
+    applyxfm = Node(fsl.ApplyXfm(out_file='%s2median.nii.gz' % opp_pe_dir, 
                                  apply_xfm=True, interp='spline', output_type='NIFTI_GZ'),
-                    name='applyxfm')
+                    name='applyxfm')        
     topup.connect(topup2median, 'out_matrix_file', applyxfm, 'in_matrix_file')
 
     make_topup_list = Node(Merge(2), name='make_topup_list')
     topup.connect(topup2median, 'out_file', make_topup_list, 'in1')
     topup.connect(applyxfm, 'out_file', make_topup_list, 'in2')
 
-    merge_topup = Node(fsl.Merge(dimension='t', output_type='NIFTI_GZ'),
+    merge_topup = Node(fsl.Merge(dimension='t', output_type='NIFTI_GZ'), 
                         name='merge_topup')
     topup.connect(make_topup_list, 'out', merge_topup, 'in_files')
 
@@ -662,14 +664,14 @@ def create_topup_workflow(num_slices, rest_pe_dir, readout,
     file_writer_topup.inputs.fname = 'topup'
     file_writer_topup.inputs.direction = pe_dirs[rest_pe_dir]
 
-    run_topup = Node(fsl.TOPUP(out_corrected='b0correct.nii.gz', numprec='float',
-                        config='b02b0.cnf', output_type='NIFTI_GZ'),
+    run_topup = Node(fsl.TOPUP(out_corrected='b0correct.nii.gz', numprec='float', 
+                        config='b02b0.cnf', output_type='NIFTI_GZ'), 
                     name='run_topup')
     topup.connect(file_writer_topup, 'encoding_file', run_topup, 'encoding_file')
 
     applytopup = Node(fsl.ApplyTOPUP(output_type='NIFTI_GZ'), name='applytopup')
     applytopup.inputs.in_index = [1]
-    applytopup.inputs.method = 'jac'
+    applytopup.inputs.method = 'jac'   
 
     file_writer_ts = file_writer_topup.clone(name='file_writer_ts')
     file_writer_ts.inputs.readout = readout
@@ -680,17 +682,17 @@ def create_topup_workflow(num_slices, rest_pe_dir, readout,
     topup.connect(run_topup, 'out_fieldcoef', applytopup, 'in_topup_fieldcoef')
     topup.connect(run_topup, 'out_movpar', applytopup, 'in_topup_movpar')
 
-    if num_slices % 2 != 0:
+    if num_slices % 2 != 0:    
 
-        rm_slice_ts = Node(fsl.ExtractROI(), name='rm_slice_ts')
+        rm_slice_ts = Node(fsl.ExtractROI(), name='rm_slice_ts')        
         rm_slice_ts.inputs.crop_list = [(0,-1), (0,-1), (0, num_slices-1), (0,-1)]
 
-        rm_slice_ref = Node(fsl.ExtractROI(), name='rm_slice_ref')
+        rm_slice_ref = Node(fsl.ExtractROI(), name='rm_slice_ref') 
         rm_slice_ref.inputs.crop_list = [(0,-1),(0,-1),(0, num_slices-1),(0,1)]
 
-        extract_main = rm_slice_ref.clone(name='extract_%s' % rest_pe_dir)
+        extract_main = rm_slice_ref.clone(name='extract_%s' % rest_pe_dir) 
 
-        extract_opp = extract_main.clone(name='extract_%s' % opp_pe_dir)
+        extract_opp = extract_main.clone(name='extract_%s' % opp_pe_dir)  
 
         topup.connect([(inputnode, rm_slice_ts, [('realigned_files', 'in_file')]),
                      (rm_slice_ts, applytopup, [('roi_file', 'in_files')]),
@@ -704,7 +706,7 @@ def create_topup_workflow(num_slices, rest_pe_dir, readout,
                      (inputnode, topup2median, [('ref_file', 'reference')]),
                      (inputnode, applyxfm, [('ref_file', 'reference')])])
 
-        extract_main = Node(fsl.ExtractROI(), name='extract_%s' % rest_pe_dir)
+        extract_main = Node(fsl.ExtractROI(), name='extract_%s' % rest_pe_dir) 
         extract_main.inputs.crop_list = [(0,-1), (0,-1), (0,-1), (0,1)]
 
         extract_opp = extract_main.clone(name='extract_%s' % opp_pe_dir)
@@ -792,7 +794,7 @@ def create_workflow(files,
     """
 
     if rest_pe_dir:
-        topup = create_topup_workflow(num_slices, rest_pe_dir, readout,
+        topup = create_topup_workflow(num_slices, rest_pe_dir, readout, 
                                       readout_topup, name='topup')
         topup.inputs.inputspec.topup_AP = topup_AP
         topup.inputs.inputspec.topup_PA = topup_PA
@@ -848,7 +850,7 @@ def create_workflow(files,
     voxel sizes.
     """
 
-    wf.connect([(name_unique, realign, [('out_file', 'in_file')]),
+    wf.connect([(name_unique, realign, [('out_file', 'in_file')]),    
                 (realign, art, [('par_file', 'realignment_parameters')])
                 ])
 
@@ -906,7 +908,7 @@ def create_workflow(files,
 
     if rest_pe_dir == None:
         wf.connect(realign, 'out_file', filter1, 'in_file')
-        wf.connect(realign, ('out_file', rename, '_filtermotart'),
+        wf.connect(realign, ('out_file', rename, '_filtermotart'), 
                    filter1, 'out_res_name')
 
     if rest_pe_dir:
@@ -1101,9 +1103,9 @@ def create_workflow(files,
     substitutions += [("_makecompcorfilter%d" % i, "") for i in range(11)[::-1]]
     substitutions += [("_get_aparc_tsnr%d/" % i, "run%d_" % (i + 1)) for i in range(11)[::-1]]
 
-    substitutions += [("T1_out_masked_pve_0_maths_warped", "compcor_csf"),
-                      ("T1_out_masked_pve_1_maths_warped", "compcor_gm"),
-                      ("T1_out_masked_pve_2_maths_warped", "compcor_wm"),
+    substitutions += [("T1_out_brain_pve_0_maths_warped", "compcor_csf"),
+                      ("T1_out_brain_pve_1_maths_warped", "compcor_gm"),
+                      ("T1_out_brain_pve_2_maths_warped", "compcor_wm"),
                       ("output_warped_image_maths", "target_brain_mask"),
                       ("median_brain_mask", "native_brain_mask"),
                       ("corr_", "")]
@@ -1141,21 +1143,20 @@ def create_workflow(files,
     wf.connect(filter2, 'out_pf', datasink, 'resting.qa.compmaps.@p')
     wf.connect(registration, 'outputspec.min_cost_file', datasink, 'resting.qa.mincost')
     wf.connect(tsnr, 'tsnr_file', datasink, 'resting.qa.tsnr.@map')
-    wf.connect(registration,'outputspec.mean2anat_mask', datasink, 'resting.qa.mask')
     wf.connect([(get_roi_tsnr, datasink, [('avgwf_txt_file', 'resting.qa.tsnr'),
                                           ('summary_file', 'resting.qa.tsnr.@summary')])])
     if rest_pe_dir:
-        wf.connect(topup, 'outputspec.topup_encoding_file',
+        wf.connect(topup, 'outputspec.topup_encoding_file', 
                    datasink, 'resting.qa.topup')
-        wf.connect(topup, 'outputspec.rest_encoding_file',
+        wf.connect(topup, 'outputspec.rest_encoding_file', 
                    datasink, 'resting.qa.topup.@acqparam_ts')
-        wf.connect(topup, 'outputspec.topup_fieldcoef',
+        wf.connect(topup, 'outputspec.topup_fieldcoef', 
                    datasink, 'resting.qa.topup.@out_fieldcoef')
-        wf.connect(topup, 'outputspec.topup_movpar',
+        wf.connect(topup, 'outputspec.topup_movpar', 
                    datasink, 'resting.qa.topup.@out_movpar')
-        wf.connect(topup, 'outputspec.topup_corrected',
+        wf.connect(topup, 'outputspec.topup_corrected', 
                    datasink, 'resting.qa.topup.@topup_corrected')
-        wf.connect(topup, 'outputspec.applytopup_corrected',
+        wf.connect(topup, 'outputspec.applytopup_corrected', 
                    datasink, 'resting.qa.topup.@applytopup_corrected')
     wf.connect(bandpass, 'out_files', datasink, 'resting.timeseries.@bandpassed')
     wf.connect(smooth, 'out_file', datasink, 'resting.timeseries.@smoothed')
@@ -1199,8 +1200,8 @@ def create_resting_workflow(args, name=None):
         readout = ((matrix - 1) * echospacing)/1000.
 
     if args.topup_dicom:
-        bwp_topup, matrix_topup = get_info_topup(args.topup_dicom)
-        echospacing_topup = 1000./(bwp_topup * matrix_topup)
+        bwp_topup, matrix_topup = get_info_topup(args.topup_dicom)   
+        echospacing_topup = 1000./(bwp_topup * matrix_topup)   
         readout_topup = ((matrix_topup - 1) * echospacing_topup)/1000.
 
     if name is None:
@@ -1295,7 +1296,7 @@ if __name__ == "__main__":
 
     wf.base_dir = work_dir
 
-    if (args.topup_dicom and (args.topup_AP is None or args.topup_PA is None or
+    if (args.topup_dicom and (args.topup_AP is None or args.topup_PA is None or  
             args.rest_pe_dir is None)):
         parser.error("topup requires:--topup_dicom,--topup_AP,--topup_PA,--rest_pe_dir")
 

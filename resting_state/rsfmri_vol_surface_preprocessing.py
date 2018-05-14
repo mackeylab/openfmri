@@ -443,9 +443,10 @@ def create_reg_workflow(name='registration'):
 
     fast = Node(fsl.FAST(), name='fast')
     register.connect(stripper, 'out_file', fast, 'in_files')
-    """"
+
+    """
     Create a mask of the median coregistered to the anatomical image
-    """"
+    """
 
     mean2anat_mask = Node(fsl.BET(mask=True), name='mean2anat_mask')
     register.connect(bbregister, 'registered_file', mean2anat_mask, 'in_file')
